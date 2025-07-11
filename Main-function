@@ -1,0 +1,444 @@
+"""
+Set up the below enviroment variables
+
+BUCKET_NAME
+FOLDER_PATH
+"""
+import boto3
+import json
+import os
+import urllib.parse
+import logging
+
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def normalize_folder_path(folder_path):
+    """
+    Normalize folder path to ensure consistent format
+    
+    Parameters:
+    - folder_path (str): Path to normalize
+    
+    Returns:
+    - str: Normalized path
+    """
+    # Remove leading slash if present
+    if folder_path.startswith('/'):
+        folder_path = folder_path[1:]
+    
+    # Ensure trailing slash if not empty
+    if folder_path and not folder_path.endswith('/'):
+        folder_path += '/'
+    
+    return folder_path
+
+def generate_presigned_url(bucket_name, object_key, expiration=3600):
+    """
+    Generate a presigned URL for an S3 object
+    
+    Parameters:
+    - bucket_name (str): Name of the S3 bucket
+    - object_key (str): Key of the S3 object
+    - expiration (int): URL expiration time in seconds (default: 1 hour)
+    
+    Returns:
+    - str: Presigned URL for the object
+    """
+    logger.info(f"Generating presigned URL for bucket: {bucket_name}, object: {object_key}, expiration: {expiration}s")
+    s3_client = boto3.client('s3')
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': object_key},
+            ExpiresIn=expiration
+        )
+        logger.info(f"Successfully generated presigned URL for {object_key}")
+        return url
+    except Exception as e:
+        logger.error(f"Error generating presigned URL: {e}")
+        return None
+
+def list_s3_objects(bucket_name, folder_path, prefix=""):
+    """
+    List objects in an S3 bucket with a specific prefix
+    
+    Parameters:
+    - bucket_name (str): Name of the S3 bucket
+    - folder_path (str): Path to the folder within the bucket
+    - prefix (str): Prefix to filter objects by
+    
+    Returns:
+    - list: List of object keys that match the prefix
+    """
+    # Normalize folder path
+    folder_path = normalize_folder_path(folder_path)
+    
+    logger.info(f"Listing objects in bucket: {bucket_name}, folder: {folder_path}, prefix: {prefix}")
+    
+    # Initialize S3 client
+    s3_client = boto3.client('s3')
+    
+    # Create the full prefix (folder path + prefix)
+    full_prefix = folder_path + prefix
+    logger.info(f"Full prefix for listing: {full_prefix}")
+    
+    try:
+        # List objects with the prefix
+        response = s3_client.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=full_prefix
+        )
+        
+        # Extract object keys
+        object_keys = []
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                object_keys.append(obj['Key'])
+            
+            logger.info(f"Found {len(object_keys)} objects with prefix {full_prefix}: {object_keys}")
+        else:
+            logger.info(f"No objects found with prefix {full_prefix}")
+        
+        # If no objects found and folder_path is not empty, try without folder path
+        if not object_keys and folder_path:
+            logger.info(f"Trying to list objects without folder path, prefix: {prefix}")
+            try:
+                response = s3_client.list_objects_v2(
+                    Bucket=bucket_name,
+                    Prefix=prefix
+                )
+                
+                if 'Contents' in response:
+                    for obj in response['Contents']:
+                        object_keys.append(obj['Key'])
+                    
+                    logger.info(f"Found {len(object_keys)} objects with prefix {prefix} (no folder path): {object_keys}")
+            except Exception as e:
+                logger.warning(f"Error listing objects without folder path: {e}")
+        
+        return object_keys
+    except Exception as e:
+        logger.error(f"Error listing objects: {e}")
+        raise
+
+def search_s3_object(bucket_name, folder_path, library):
+    """
+    Search for an object with the exact name in an S3 bucket folder
+    
+    Parameters:
+    - bucket_name (str): Name of the S3 bucket
+    - folder_path (str): Path to the folder within the bucket
+    - library (str): The exact filename to search for (without extension)
+    
+    Returns:
+    - dict: Contains information about whether the object was found and its details
+    """
+    # Normalize folder path
+    folder_path = normalize_folder_path(folder_path)
+    
+    logger.info(f"Searching for object in bucket: {bucket_name}, folder: {folder_path}, library: {library}")
+    
+    # Initialize S3 client
+    s3_client = boto3.client('s3')
+    
+    # First, list all objects in the bucket to help with debugging
+    try:
+        all_objects = list_s3_objects(bucket_name, "", "")
+        logger.info(f"All objects in bucket: {all_objects}")
+    except Exception as e:
+        logger.warning(f"Error listing all objects in bucket: {e}")
+    
+    # Create the full object key (folder path + filename + .zip extension)
+    object_key = folder_path + library + '.zip'
+    logger.info(f"Full object key to search: {object_key}")
+    
+    # First, list objects with the library prefix to help with debugging
+    try:
+        matching_objects = list_s3_objects(bucket_name, folder_path, library)
+        if matching_objects:
+            logger.info(f"Found objects with similar names: {matching_objects}")
+        else:
+            logger.info(f"No objects found with similar names to {library}")
+            
+            # Try without folder path
+            matching_objects = list_s3_objects(bucket_name, "", library)
+            if matching_objects:
+                logger.info(f"Found objects with similar names (no folder path): {matching_objects}")
+                
+                # If we found a match without the folder path, update the object key
+                if len(matching_objects) == 1:
+                    object_key = matching_objects[0]
+                    logger.info(f"Using found object key: {object_key}")
+    except Exception as e:
+        logger.warning(f"Error listing similar objects: {e}")
+    
+    # Now try to get the exact object
+    try:
+        # Check if the object exists
+        s3_client.head_object(Bucket=bucket_name, Key=object_key)
+        logger.info(f"Object found: {object_key}")
+        
+        # Generate presigned URL for the object
+        presigned_url = generate_presigned_url(bucket_name, object_key)
+        
+        return {
+            'found': True,
+            'object_key': object_key,
+            'bucket_name': bucket_name,
+            'presigned_url': presigned_url
+        }
+    except s3_client.exceptions.ClientError as e:
+        # Object does not exist
+        if e.response['Error']['Code'] == '404':
+            logger.warning(f"Object not found: {object_key}")
+            
+            # Try without the .zip extension as a fallback
+            try:
+                alt_object_key = folder_path + library
+                logger.info(f"Trying alternative key without .zip extension: {alt_object_key}")
+                s3_client.head_object(Bucket=bucket_name, Key=alt_object_key)
+                logger.info(f"Object found with alternative key: {alt_object_key}")
+                
+                # Generate presigned URL for the object
+                presigned_url = generate_presigned_url(bucket_name, alt_object_key)
+                
+                return {
+                    'found': True,
+                    'object_key': alt_object_key,
+                    'bucket_name': bucket_name,
+                    'presigned_url': presigned_url
+                }
+            except s3_client.exceptions.ClientError:
+                logger.warning(f"Object also not found with alternative key: {alt_object_key}")
+            
+            # Try without folder path as a last resort
+            try:
+                alt_object_key = library + '.zip'
+                logger.info(f"Trying alternative key without folder path: {alt_object_key}")
+                s3_client.head_object(Bucket=bucket_name, Key=alt_object_key)
+                logger.info(f"Object found with alternative key: {alt_object_key}")
+                
+                # Generate presigned URL for the object
+                presigned_url = generate_presigned_url(bucket_name, alt_object_key)
+                
+                return {
+                    'found': True,
+                    'object_key': alt_object_key,
+                    'bucket_name': bucket_name,
+                    'presigned_url': presigned_url
+                }
+            except s3_client.exceptions.ClientError:
+                logger.warning(f"Object also not found with alternative key: {alt_object_key}")
+            
+            return {
+                'found': False,
+                'library': library,
+                'bucket_name': bucket_name,
+                'folder_path': folder_path
+            }
+        # Some other error
+        logger.error(f"S3 client error: {e}")
+        raise
+
+def invoke_fallback_lambda(fallback_lambda_name, library, bucket_name, folder_path):
+    """
+    Invoke another Lambda function when the object is not found
+    
+    Parameters:
+    - fallback_lambda_name (str): Name or ARN of the Lambda function to invoke
+    - library (str): The filename that was searched for
+    - bucket_name (str): Name of the S3 bucket
+    - folder_path (str): Path to the folder within the bucket
+    
+    Returns:
+    - dict: Response from the invoked Lambda function
+    """
+    logger.info(f"Invoking fallback Lambda: {fallback_lambda_name} for library: {library}")
+    lambda_client = boto3.client('lambda')
+    
+    if not fallback_lambda_name:
+        logger.error("Fallback Lambda function name is required but not provided")
+        raise ValueError("Fallback Lambda function name is required")
+    
+    # Prepare payload for the fallback Lambda
+    payload = {
+        'library': library,
+        'bucket_name': bucket_name,
+        'folder_path': folder_path
+    }
+    logger.info(f"Fallback Lambda payload: {payload}")
+    
+    # Invoke the fallback Lambda function
+    try:
+        response = lambda_client.invoke(
+            FunctionName=fallback_lambda_name,
+            InvocationType='RequestResponse',  # Synchronous invocation
+            Payload=json.dumps(payload)
+        )
+        
+        # Parse and return the response from the fallback Lambda
+        response_payload = json.loads(response['Payload'].read().decode('utf-8'))
+        logger.info(f"Fallback Lambda response received")
+        return response_payload
+    except Exception as e:
+        logger.error(f"Error invoking fallback Lambda {fallback_lambda_name}: {e}")
+        raise
+
+def lambda_handler(event, context):
+    """
+    Lambda function that searches for a specific object in S3.
+    If found, returns a presigned URL. If not found, invokes a fallback Lambda.
+    
+    Environment variables:
+    - BUCKET_NAME: Name of the S3 bucket
+    - FOLDER_PATH: Path to the folder within the bucket
+    - DEFAULT_FALLBACK_LAMBDA: Optional default Lambda function to call if not specified in request
+    
+    Expected API Gateway headers:
+    - library: The exact filename to search for
+    - pythonVersion: Python version to use (e.g., "313" for Python 3.13)
+    
+    Returns:
+    - If object found: Presigned URL for the object
+    - If object not found: Response from the fallback Lambda function
+    """
+    logger.info(f"Lambda handler started with event: {json.dumps(event)}")
+    
+    try:
+        # Get bucket name and folder path from environment variables
+        bucket_name = os.environ.get('BUCKET_NAME')
+        folder_path = os.environ.get('FOLDER_PATH', '')
+        default_fallback_lambda = os.environ.get('DEFAULT_FALLBACK_LAMBDA')
+        
+        logger.info(f"Environment variables: BUCKET_NAME={bucket_name}, FOLDER_PATH={folder_path}")
+        
+        # Validate required environment variables
+        if not bucket_name:
+            logger.error("BUCKET_NAME environment variable is not set")
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps('Error: BUCKET_NAME environment variable is not set')
+            }
+        
+        # Extract headers and parameters
+        headers = event.get('headers', {})
+        logger.info(f"Headers from event: {headers}")
+        
+        # Get library and pythonVersion from headers or event body
+        library = None
+        python_version = None
+        
+        if headers:
+            library = headers.get('library')
+            python_version = headers.get('pythonVersion')
+            logger.info(f"From headers - library: {library}, pythonVersion: {python_version}")
+        
+        # If not found in headers, try direct event properties
+        if not library:
+            library = event.get('library')
+            logger.info(f"From event body - library: {library}")
+        
+        if not python_version:
+            python_version = event.get('pythonVersion')
+            logger.info(f"From event body - pythonVersion: {python_version}")
+        
+        # Validate required parameters
+        if not library:
+            logger.error("'library' parameter is required but not provided")
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps('Error: "library" parameter is required')
+            }
+            
+        if not python_version:
+            logger.error("'pythonVersion' parameter is required but not provided")
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps('Error: "pythonVersion" parameter is required')
+            }
+        
+        # Normalize folder path
+        folder_path = normalize_folder_path(folder_path)
+        logger.info(f"Normalized folder path: {folder_path}")
+        
+        # Construct the filename with library and python version (without .zip extension)
+        filename = f"{library}_{python_version}"
+        logger.info(f"Constructed filename: {filename}")
+        
+        # Determine fallback Lambda name based on Python version
+        # IMPORTANT: Make sure python_version doesn't already contain "python" prefix
+        if python_version.startswith("python"):
+            fallback_lambda = python_version  # Already has "python" prefix
+        else:
+            fallback_lambda = f"python{python_version}"  # Add "python" prefix
+            
+        logger.info(f"Fallback Lambda name: {fallback_lambda}")
+        
+        # Search for the exact object (search_s3_object will add .zip extension)
+        logger.info(f"Searching for object in S3: {filename}.zip")
+        result = search_s3_object(bucket_name, folder_path, filename)
+        
+        if result['found']:
+            # Object was found, return the presigned URL
+            logger.info(f"Object found, returning presigned URL")
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'found': True,
+                    'presigned_url': result['presigned_url']
+                })
+            }
+        else:
+            # Invoke fallback Lambda based on Python version
+            logger.info(f"Object not found, invoking fallback Lambda: {fallback_lambda}")
+            try:
+                fallback_response = invoke_fallback_lambda(
+                    fallback_lambda, library, bucket_name, folder_path
+                )
+                
+                # Return the fallback Lambda's response
+                logger.info(f"Returning fallback Lambda response")
+                return fallback_response
+            except Exception as e:
+                logger.error(f"Failed to invoke fallback Lambda: {str(e)}")
+                return {
+                    'statusCode': 500,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    'body': json.dumps({
+                        'found': False,
+                        'error': f'Failed to invoke fallback Lambda: {str(e)}'
+                    })
+                }
+        
+    except Exception as e:
+        # Return error message
+        logger.error(f"Unhandled exception in lambda_handler: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps(f'Error: {str(e)}')
+        }
