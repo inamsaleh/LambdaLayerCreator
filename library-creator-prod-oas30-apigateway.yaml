@@ -1,0 +1,34 @@
+openapi: "3.0.1"
+info:
+  title: "library-creator"
+  version: "2025-07-02T23:39:14Z"
+servers:
+- url: "https://o4d41klkm9.execute-api.us-east-2.amazonaws.com/{basePath}"
+  variables:
+    basePath:
+      default: "prod"
+paths:
+  /:
+    x-amazon-apigateway-any-method:
+      responses:
+        "200":
+          description: "200 response"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Empty"
+      x-amazon-apigateway-integration:
+        httpMethod: "POST"
+        uri: "arn:aws:apigateway:us-east-2:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-2:323573447059:function:mainFunction/invocations"
+        responses:
+          default:
+            statusCode: "200"
+        passthroughBehavior: "when_no_match"
+        timeoutInMillis: 29000
+        contentHandling: "CONVERT_TO_TEXT"
+        type: "aws_proxy"
+components:
+  schemas:
+    Empty:
+      title: "Empty Schema"
+      type: "object"
