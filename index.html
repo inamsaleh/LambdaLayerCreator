@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS Lambda Library Packager</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+</head>
+<body>
+    <div class="background-animation">
+        <div class="cube"></div>
+        <div class="cube"></div>
+        <div class="cube"></div>
+        <div class="cube"></div>
+        <div class="cube"></div>
+    </div>
+    
+    <div class="container">
+        <header class="animate__animated animate__fadeInDown">
+            <div class="logo">
+                <svg width="40" height="40" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M0 12.5L39.5 0L80 12.5V67.5L39.5 80L0 67.5V12.5Z" fill="#FF9900"/>
+                    <path d="M16 25L39.5 17L64 25V55L39.5 63L16 55V25Z" fill="#252F3E"/>
+                    <path d="M39.5 30L25 35V50L39.5 55L54 50V35L39.5 30Z" fill="#FF9900"/>
+                </svg>
+                <h1>Lambda<span>Forge</span></h1>
+            </div>
+            <p class="tagline">Next-Gen Python Package Generator for AWS Lambda</p>
+        </header>
+        
+        <div class="form-container animate__animated animate__fadeIn">
+            <div class="glow-effect"></div>
+            <h2>Package Configuration</h2>
+            
+            <form id="packageForm">
+                <div class="form-group">
+                    <label for="libraryName">Library Name:</label>
+                    <input 
+                        type="text" 
+                        id="libraryName" 
+                        name="libraryName" 
+                        required 
+                        placeholder="requests, pandas, numpy, etc."
+                        pattern="^[a-zA-Z0-9_-]+$"
+                        title="Only letters, numbers, hyphens, and underscores are allowed"
+                    >
+                    <p class="input-help">Only letters, numbers, hyphens (-), and underscores (_) are allowed</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="pythonVersion">Python Runtime:</label>
+                    <select id="pythonVersion" name="pythonVersion" required>
+                        <option value="">Select Python version</option>
+                        <option value="python3.7">Python 3.7</option>
+                        <option value="python3.8">Python 3.8</option>
+                        <option value="python3.9">Python 3.9</option>
+                        <option value="python3.10">Python 3.10</option>
+                        <option value="python3.11">Python 3.11</option>
+                    </select>
+                    <p class="input-help">Select the Python runtime version for your Lambda function</p>
+                </div>
+                
+                <button type="submit" id="generateBtn" class="pulse">
+                    <span class="btn-text">Generate Package</span>
+                    <span class="btn-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M13 5.41V21H11V5.41L5.41 11L4 9.59L12 1.59L20 9.59L18.59 11L13 5.41Z" fill="white"/>
+                        </svg>
+                    </span>
+                </button>
+            </form>
+        </div>
+        
+        <div class="result-container animate__animated animate__fadeIn" id="resultContainer" style="display: none;">
+            <div class="glow-effect"></div>
+            <div class="success-message">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM10 17L5 12L6.41 10.59L10 14.17L17.59 6.58L19 8L10 17Z" fill="#4CAF50"/>
+                </svg>
+                <p>Package successfully generated!</p>
+            </div>
+            <div class="download-section">
+                <p>Your Lambda layer package is ready. Click the button below to download:</p>
+                <button id="downloadBtn" class="download-btn">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M8 12L3 7L4.4 5.55L7 8.15V0H9V8.15L11.6 5.55L13 7L8 12ZM0 16V11H2V14H14V11H16V16H0Z" fill="white"/>
+                    </svg>
+                    <span>Download Package</span>
+                </button>
+                <p class="file-info">The file will be downloaded as a ZIP archive that can be directly uploaded as a Lambda Layer.</p>
+            </div>
+        </div>
+        
+        <div class="loading-container animate__animated animate__fadeIn" id="loadingContainer" style="display: none;">
+            <div class="glow-effect"></div>
+            <div class="futuristic-spinner">
+                <div class="spinner-ring"></div>
+                <div class="spinner-ring"></div>
+                <div class="spinner-dot"></div>
+            </div>
+            <p>Generating your package<span class="dot-animation">...</span></p>
+        </div>
+        
+        <footer class="animate__animated animate__fadeIn">
+            <div class="footer-content">
+                <p class="copyright">© 2025 LambdaForge</p>
+                <p class="disclaimer">This is not an official AWS service. This tool is maintained by a third party and is not affiliated with or endorsed by Amazon Web Services.</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Add input validation for library name
+        const libraryNameInput = document.getElementById('libraryName');
+        
+        libraryNameInput.addEventListener('input', function(e) {
+            const value = e.target.value;
+            const validValue = value.replace(/[^a-zA-Z0-9_-]/g, '');
+            
+            if (value !== validValue) {
+                e.target.value = validValue;
+            }
+        });
+        
+        // Animated dots for loading text
+        function animateDots() {
+            const dotElement = document.querySelector('.dot-animation');
+            let dotCount = 0;
+            
+            setInterval(() => {
+                dotCount = (dotCount + 1) % 4;
+                dotElement.textContent = '.'.repeat(dotCount);
+            }, 500);
+        }
+        
+        document.getElementById('packageForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Show loading spinner
+            document.getElementById('loadingContainer').style.display = 'flex';
+            animateDots();
+            
+            // Get form values
+            const libraryName = document.getElementById('libraryName').value;
+            const pythonVersion = document.getElementById('pythonVersion').value;
+            
+            // Create request
+            fetch('https://example.com/generate-package', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'libraryName': libraryName,
+                    'pythonVersion': pythonVersion
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading spinner
+                document.getElementById('loadingContainer').style.display = 'none';
+                
+                // Show result container
+                document.getElementById('resultContainer').style.display = 'block';
+                
+                // Set download button URL
+                const downloadBtn = document.getElementById('downloadBtn');
+                downloadBtn.addEventListener('click', function() {
+                    window.location.href = data.presignedUrl;
+                });
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('loadingContainer').style.display = 'none';
+                alert('An error occurred while generating the package. Please try again.');
+            });
+        });
+    </script>
+</body>
+</html>
