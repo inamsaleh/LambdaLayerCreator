@@ -1,8 +1,11 @@
 """
-Set up the below enviroment variables
+Required headers from the event are below
 
-BUCKET_NAME
-FOLDER_PATH
+- library
+- pythonVersion
+
+The download URL will be returned in the header download_url
+
 """
 import boto3
 import json
@@ -403,7 +406,7 @@ def lambda_handler(event, context):
                 },
                 'body': json.dumps({
                     'found': True,
-                    'presigned_url': result['presigned_url']
+                    'download_url': result['presigned_url']  # Changed from 'presigned_url' to 'download_url'
                 })
             }
         else:
